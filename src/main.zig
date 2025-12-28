@@ -41,11 +41,6 @@ pub fn main() !void {
         }
     }
 
-    // Fall back to ZAWINSKI_STORE env var
-    if (explicit_store == null) {
-        explicit_store = std.posix.getenv("ZAWINSKI_STORE");
-    }
-
     if (args.items.len < 2) {
         try printUsage(stdout);
         try stdout.flush();
@@ -120,7 +115,7 @@ fn printUsage(stdout: anytype) !void {
         \\  search <query>          Search messages
         \\
         \\Global Options:
-        \\  --store PATH            Use store at PATH (or set ZAWINSKI_STORE)
+        \\  --store PATH            Use store at PATH instead of auto-discovery
         \\
         \\Command Options:
         \\  --json                  Output as JSON

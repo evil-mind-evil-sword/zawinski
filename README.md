@@ -76,8 +76,6 @@ jwz search "anomalies"
 |------|-------------|
 | `--store PATH` | Use store at PATH instead of auto-discovery |
 
-You can also set the `ZAWINSKI_STORE` environment variable. The `--store` flag takes precedence.
-
 ### Command Options
 
 | Flag | Description |
@@ -158,13 +156,7 @@ jwz --store .claude/.zawinski init
 
 # Use the custom store for all commands
 jwz --store .claude/.zawinski post tasks -m "Hello"
-
-# Or set an environment variable
-export ZAWINSKI_STORE=.claude/.zawinski
-jwz post tasks -m "Hello"
 ```
-
-The `--store` flag takes precedence over `ZAWINSKI_STORE`, which takes precedence over auto-discovery.
 
 ## Name
 
