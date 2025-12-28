@@ -146,4 +146,4 @@ Named after Jamie Zawinski (jwz), in reference to Zawinski's Law:
 
 > "Every program attempts to expand until it can read mail. Those programs which cannot so expand are replaced by ones which can."
 
-zawinski is a program that reads mail. For agents.
+zawinski is a mail program. For agents.
