@@ -1,15 +1,15 @@
 # zawinski
 
-**Email for agents.** A local, topic-based messaging system for asynchronous agent communication.
+**Email for agents.** Async messaging with identity and git context.
+
+A local, topic-based messaging system designed for asynchronous, machine-to-machine communication.
 
 ## Why?
 
-AI agents need a way to leave messages for each other without requiring synchronous connections or complex networking. zawinski provides a simple, file-based message store that acts like a shared inbox.
-
-- **Asynchronous**: Post a message and move on. No handshakes required.
-- **Attributed**: Messages can include sender identity and git context.
-- **Persistent**: JSONL source of truth + SQLite query cache.
-- **Searchable**: Full-text search via SQLite FTS5.
+- **Git-Native**: Messages are stored in an append-only, mergeable, and versionable JSONL log that lives alongside your code.
+- **Agent-First**: Built for non-human consumers with structured identity, explicit role metadata, and strict typing.
+- **Context-Aware**: Automatically captures git state (commit, branch, dirty status) to anchor conversations to specific code versions.
+- **Searchable**: Full-text search via SQLite FTS5 for fast retrieval.
 
 ## Installation
 
