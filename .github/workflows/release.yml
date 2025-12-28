@@ -18,15 +18,15 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-linux
-            artifact: zawinski-linux-x86_64
+            artifact: jwz-linux-x86_64
             zig_platform: x86_64-linux
           - os: macos-latest
             target: x86_64-macos
-            artifact: zawinski-macos-x86_64
+            artifact: jwz-macos-x86_64
             zig_platform: aarch64-macos
           - os: macos-latest
             target: aarch64-macos
-            artifact: zawinski-macos-aarch64
+            artifact: jwz-macos-aarch64
             zig_platform: aarch64-macos
 
     runs-on: ${{ matrix.os }}
@@ -48,7 +48,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist
-          cp zig-out/bin/zawinski dist/${{ matrix.artifact }}
+          cp zig-out/bin/jwz dist/${{ matrix.artifact }}
           chmod +x dist/${{ matrix.artifact }}
 
       - name: Upload artifact
