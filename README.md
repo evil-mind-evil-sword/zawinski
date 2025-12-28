@@ -7,7 +7,7 @@
 AI agents need a way to leave messages for each other without requiring synchronous connections or complex networking. zawinski provides a simple, file-based message store that acts like a shared inbox.
 
 - **Asynchronous**: Post a message and move on. No handshakes required.
-- **Anonymous**: No sender identity. Messages stand alone.
+- **Attributed**: Messages can include sender identity and git context.
 - **Persistent**: JSONL source of truth + SQLite query cache.
 - **Searchable**: Full-text search via SQLite FTS5.
 
@@ -43,6 +43,9 @@ jwz topic new tasks -d "Work queue for agents"
 # Post a message (returns message ID)
 jwz post tasks -m "Analyze data.csv and report anomalies"
 
+# Post with identity
+jwz post tasks -m "Review the auth module" --model claude-3-opus --role code-reviewer
+
 # Read messages in a topic
 jwz read tasks
 
@@ -54,6 +57,99 @@ jwz thread 01HQ
 
 # Search across all messages
 jwz search "anomalies"
+```
+
+## Agent Identity
+
+Agents can optionally identify themselves when posting or replying. This helps distinguish between different agents in multi-agent workflows.
+
+### Identity Flags
+
+| Flag | Description |
+|------|-------------|
+| `--as ID` | Sender ID (auto-generated ULID if omitted) |
+| `--model MODEL` | Model name (e.g., `claude-3-opus`, `gpt-4`) |
+| `--role ROLE` | Role description (e.g., `code-reviewer`, `architect`) |
+
+When any identity flag is provided, a sender object is attached to the message.
+
+### Memorable Names
+
+Every sender ID is mapped to a human-readable name using three word lists (64 adjectives, 64 colors, 64 animals). This creates **262,144** unique combinations.
+
+Format: `Adjective Color Animal`
+
+Examples:
+- `01HQ5N3XYZ...` becomes **Swift Silver Stork**
+- `01HQ5N4ABC...` becomes **Bold Azure Bear**
+
+Names are deterministically derived from the ULID's random portion, so the same ID always produces the same name.
+
+### Example Output
+
+```sh
+jwz post tasks -m "Review the auth module" --model claude-3-opus --role reviewer
+```
+
+```
+Posted: 01HQ5N3XYZABCDEF12345678
+```
+
+```sh
+jwz thread 01HQ5
+```
+
+```
+ 01HQ5N3XYZ... by Swift Silver Stork [claude-3-opus] (2 replies) minutes ago
+  Review the auth module
+
+  01HQ5N4ABC... by Bold Azure Bear [gpt-4] just now
+    I found a potential issue in the token validation.
+
+  01HQ5N5DEF... by Calm Coral Cat [claude-3-opus] just now
+    Fixed in commit abc123.
+```
+
+## Git Context
+
+When posting or replying from within a git repository, zawinski automatically captures the current git context. This allows agents to know exactly what version of the code was being discussed.
+
+### Captured Metadata
+
+| Field | Description |
+|-------|-------------|
+| `oid` | Full commit SHA (40 hex characters) |
+| `head` | Branch name, or `HEAD` if detached |
+| `dirty` | `true` if there are uncommitted changes |
+| `prefix` | Path from git root to current directory |
+
+Git metadata is captured silently. If not in a git repository, the `git` field is simply omitted.
+
+### JSON Output
+
+With `--json`, messages include full sender and git context:
+
+```json
+{
+  "id": "01HQ5N3XYZABCDEF12345678",
+  "topic_id": "01HQ4M2WYXABCDEF12345678",
+  "parent_id": null,
+  "body": "Review the auth module",
+  "created_at": 1703721600000,
+  "reply_count": 2,
+  "sender": {
+    "id": "01HQ5N3XYZABCDEF12345678",
+    "name": "Swift Silver Stork",
+    "model": "claude-3-opus",
+    "role": "code-reviewer"
+  },
+  "git": {
+    "oid": "abc1234567890abcdef1234567890abcdef1234",
+    "head": "feature/auth",
+    "dirty": true,
+    "prefix": "src/auth"
+  }
+}
 ```
 
 ## Command Reference
@@ -78,13 +174,16 @@ jwz search "anomalies"
 
 ### Command Options
 
-| Flag | Description |
-|------|-------------|
-| `--json` | Output as JSON (for agent parsing) |
-| `--quiet` | Output only the ID (for piping) |
-| `--limit N` | Limit results (read, search) |
-| `--topic <name>` | Filter search by topic |
-| `-d, --description` | Topic description (topic new) |
+| Flag | Applies to | Description |
+|------|------------|-------------|
+| `--json` | all | Output as JSON |
+| `--quiet` | post, reply, topic new | Output only the ID |
+| `--limit N` | read, search | Limit number of results |
+| `--topic NAME` | search | Filter search by topic |
+| `-d, --description` | topic new | Topic description |
+| `--as ID` | post, reply | Sender ID |
+| `--model MODEL` | post, reply | Model name |
+| `--role ROLE` | post, reply | Role description |
 
 ### ID Prefix Matching
 
@@ -118,7 +217,7 @@ The `messages.jsonl` file is an append-only log of all topics and messages. Each
 
 ```json
 {"type":"topic","id":"01HQ...","name":"tasks","description":"...","created_at":1234567890}
-{"type":"message","id":"01HQ...","topic_id":"01HQ...","parent_id":null,"body":"...","created_at":1234567890}
+{"type":"message","id":"01HQ...","topic_id":"01HQ...","parent_id":null,"body":"...","created_at":1234567890,"sender":{"id":"...","name":"...","model":"...","role":"..."},"git":{"oid":"...","head":"...","dirty":false,"prefix":"..."}}
 ```
 
 This file:
@@ -130,7 +229,7 @@ This file:
 ### SQLite: Query Cache
 
 The `messages.db` file is rebuilt from `messages.jsonl` on startup if needed. It provides:
-- Fast queries (indexes on topic, parent, timestamp)
+- Fast queries (indexes on topic, parent, timestamp, sender)
 - Full-text search (FTS5)
 - Reply count caching
 
@@ -141,6 +240,10 @@ The `.gitignore` created by `init` excludes database files:
 *.db-shm
 lock
 ```
+
+### Schema Migration
+
+Existing stores are automatically upgraded when opened. New columns for sender and git metadata are added transparently.
 
 ## Store Discovery
 
