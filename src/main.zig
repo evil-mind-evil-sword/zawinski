@@ -54,7 +54,7 @@ pub fn main() !void {
 
     // Handle version before anything else
     if (std.mem.eql(u8, cmd, "version") or std.mem.eql(u8, cmd, "--version") or std.mem.eql(u8, cmd, "-V")) {
-        try stdout.writeAll("jwz 0.5.2\n");
+        try stdout.writeAll("jwz 0.5.3\n");
         try stdout.flush();
         return;
     }
@@ -346,14 +346,16 @@ fn cmdPost(allocator: std.mem.Allocator, stdout: anytype, store: *Store, args: [
 
     // Auto-create topic if --create flag is set
     if (create_topic) {
-        // Reject UUID-like topic names to prevent agents from accidentally creating garbage topics
-        if (looksLikeUuid(topic_name.?)) {
-            die("Invalid topic name: '{s}' looks like a UUID.\n\nTopic names should be descriptive (e.g., 'tasks', 'research:myproject').\nUse 'jwz topic list' to see existing topics.", .{topic_name.?});
-        }
+        // Try to create the topic
         if (store.createTopic(topic_name.?, "")) |topic_id| {
+            // New topic was created - warn about UUID-like names (likely a mistake)
+            if (looksLikeUuid(topic_name.?)) {
+                std.debug.print("warning: topic '{s}' looks like a UUID\n", .{topic_name.?});
+                std.debug.print("hint: use descriptive names like 'tasks' or 'research:myproject'\n\n", .{});
+            }
             allocator.free(topic_id);
         } else |err| switch (err) {
-            StoreError.TopicExists => {}, // Already exists, that's fine
+            StoreError.TopicExists => {}, // Already exists - idempotent, no UUID check needed
             else => return err,
         }
     }
