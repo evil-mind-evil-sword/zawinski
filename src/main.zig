@@ -54,7 +54,7 @@ pub fn main() !void {
 
     // Handle version before anything else
     if (std.mem.eql(u8, cmd, "version") or std.mem.eql(u8, cmd, "--version") or std.mem.eql(u8, cmd, "-V")) {
-        try stdout.writeAll("jwz 0.6.1\n");
+        try stdout.writeAll("jwz 0.6.2\n");
         try stdout.flush();
         return;
     }
@@ -1048,7 +1048,53 @@ fn printMessageTree(allocator: std.mem.Allocator, stdout: anytype, store: *Store
 }
 
 fn writeMessageJson(stdout: anytype, msg: zawinski.store.Message) !void {
-    try writeMessageJsonWithDepth(stdout, msg, null);
+    // Use separate struct without depth field for show/search (depth not applicable)
+    const SenderJson = struct {
+        id: []const u8,
+        name: []const u8,
+        model: ?[]const u8,
+        role: ?[]const u8,
+    };
+    const sender_json: ?SenderJson = if (msg.sender) |s| .{
+        .id = s.id,
+        .name = s.name,
+        .model = s.model,
+        .role = s.role,
+    } else null;
+
+    const GitJson = struct {
+        oid: []const u8,
+        head: []const u8,
+        dirty: bool,
+        prefix: []const u8,
+    };
+    const git_json: ?GitJson = if (msg.git) |g| .{
+        .oid = g.oid,
+        .head = g.head,
+        .dirty = g.dirty,
+        .prefix = g.prefix,
+    } else null;
+
+    const record = struct {
+        id: []const u8,
+        topic_id: []const u8,
+        parent_id: ?[]const u8,
+        body: []const u8,
+        created_at: i64,
+        reply_count: i32,
+        sender: ?SenderJson,
+        git: ?GitJson,
+    }{
+        .id = msg.id,
+        .topic_id = msg.topic_id,
+        .parent_id = msg.parent_id,
+        .body = msg.body,
+        .created_at = msg.created_at,
+        .reply_count = msg.reply_count,
+        .sender = sender_json,
+        .git = git_json,
+    };
+    try std.json.Stringify.value(record, .{ .whitespace = .minified }, stdout);
 }
 
 fn writeMessageJsonWithDepth(stdout: anytype, msg: zawinski.store.Message, depth: ?u32) !void {
