@@ -4,13 +4,6 @@
 
 A local, topic-based messaging system designed for asynchronous, machine-to-machine communication.
 
-## Why?
-
-- **Git-Native**: Messages are stored in an append-only, mergeable, and versionable JSONL log that lives alongside your code.
-- **Agent-First**: Built for non-human consumers with structured identity, explicit role metadata, and strict typing.
-- **Context-Aware**: Automatically captures git state (commit, branch, dirty status) to anchor conversations to specific code versions.
-- **Searchable**: Full-text search via SQLite FTS5 for fast retrieval.
-
 ## Install
 
 ```sh
@@ -30,6 +23,13 @@ zig build -Doptimize=ReleaseFast
 
 The binary is placed in `zig-out/bin/jwz`.
 </details>
+
+## Why?
+
+- **Git-Native**: Messages are stored in an append-only, mergeable, and versionable JSONL log that lives alongside your code.
+- **Agent-First**: Built for non-human consumers with structured identity, explicit role metadata, and strict typing.
+- **Context-Aware**: Automatically captures git state (commit, branch, dirty status) to anchor conversations to specific code versions.
+- **Searchable**: Full-text search via SQLite FTS5 for fast retrieval.
 
 ## Quick Start
 
