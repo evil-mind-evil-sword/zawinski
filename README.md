@@ -26,10 +26,9 @@ The binary is placed in `zig-out/bin/jwz`.
 
 ## Why?
 
-- **Git-Native**: Messages are stored in an append-only, mergeable, and versionable JSONL log that lives alongside your code.
-- **Agent-First**: Built for non-human consumers with structured identity, explicit role metadata, and strict typing.
-- **Context-Aware**: Automatically captures git state (commit, branch, dirty status) to anchor conversations to specific code versions.
-- **Searchable**: Full-text search via SQLite FTS5 for fast retrieval.
+Agents need to communicate asynchronously—one agent kicks off a task, another picks it up later, a third reviews the result. But most messaging systems assume human readers: rich text, threading UIs, notification badges. Agents don't need any of that. They need structured data they can parse reliably.
+
+zawinski stores messages in an append-only JSONL log. This format merges cleanly in git, so multiple agents can work in parallel without conflicts. Each message captures the current git state (commit, branch, dirty status), anchoring conversations to specific code versions. A SQLite cache provides full-text search when you need to find something later.
 
 ## Quick Start
 
