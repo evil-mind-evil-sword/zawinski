@@ -59,6 +59,13 @@ pub fn main() !void {
         return;
     }
 
+    // Handle help
+    if (std.mem.eql(u8, cmd, "help") or std.mem.eql(u8, cmd, "--help") or std.mem.eql(u8, cmd, "-h")) {
+        try printUsage(stdout);
+        try stdout.flush();
+        return;
+    }
+
     // Handle init before store discovery
     if (std.mem.eql(u8, cmd, "init")) {
         cmdInit(allocator, stdout, args.items[2..], explicit_store) catch |err| {
@@ -106,7 +113,7 @@ pub fn main() !void {
             break :blk cmdPost(allocator, stdout, &store, args.items[2..]);
         } else if (std.mem.eql(u8, cmd, "reply")) {
             break :blk cmdReply(allocator, stdout, &store, args.items[2..]);
-        } else if (std.mem.eql(u8, cmd, "read")) {
+        } else if (std.mem.eql(u8, cmd, "read") or std.mem.eql(u8, cmd, "list")) {
             break :blk cmdRead(allocator, stdout, &store, args.items[2..]);
         } else if (std.mem.eql(u8, cmd, "show")) {
             break :blk cmdShow(allocator, stdout, &store, args.items[2..]);
@@ -136,13 +143,14 @@ fn printUsage(stdout: anytype) !void {
         \\  topic list              List all topics
         \\  post <topic> -m <msg>   Post a message (auto-inits store and topic)
         \\  reply <id> -m <msg>     Reply to a message
-        \\  read <topic>            Read messages in a topic
+        \\  list <topic>            List messages in a topic (alias: read)
         \\  show <id>               Show a message
         \\  thread <id>             Show a message and all replies
         \\  search <query>          Search messages
         \\  blob put <file>         Store a blob, output content hash
         \\  blob get <hash>         Retrieve blob data by hash
         \\  blob info <hash>        Show blob metadata
+        \\  help                    Show this help
         \\
         \\Global Options:
         \\  --store PATH            Use store at PATH instead of auto-discovery
