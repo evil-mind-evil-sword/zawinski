@@ -556,7 +556,7 @@ fn cmdRead(allocator: std.mem.Allocator, stdout: anytype, store: *Store, args: [
     }
 
     if (topic_name == null) {
-        die("usage: jwz read <topic> [--limit N] [--summary] [--json]", .{});
+        die("usage: jwz list <topic> [--limit N] [--summary] [--json]", .{});
     }
 
     const topic = try store.fetchTopic(topic_name.?);
@@ -784,12 +784,16 @@ fn cmdSearch(allocator: std.mem.Allocator, stdout: anytype, store: *Store, args:
     var topic_name: ?[]const u8 = null;
     var limit: u32 = 20;
     var json = false;
+    var summary = false;
 
     var i: usize = 0;
     while (i < args.len) {
         const arg = args[i];
         if (std.mem.eql(u8, arg, "--json")) {
             json = true;
+            i += 1;
+        } else if (std.mem.eql(u8, arg, "--summary") or std.mem.eql(u8, arg, "-s")) {
+            summary = true;
             i += 1;
         } else if (std.mem.eql(u8, arg, "--topic")) {
             topic_name = nextValue(args, &i, "topic");
@@ -807,7 +811,7 @@ fn cmdSearch(allocator: std.mem.Allocator, stdout: anytype, store: *Store, args:
     }
 
     if (query == null) {
-        die("usage: jwz search <query> [--topic t] [--limit N] [--json]", .{});
+        die("usage: jwz search <query> [--topic t] [--limit N] [-s|--summary] [--json]", .{});
     }
 
     const messages = try store.searchMessages(query.?, topic_name, limit);
@@ -835,9 +839,11 @@ fn cmdSearch(allocator: std.mem.Allocator, stdout: anytype, store: *Store, args:
                 try stdout.print("{s} {s}\n", .{ msg.id, formatTimeAgo(msg.created_at) });
                 // Truncate body for display
                 const max_len: usize = 80;
-                const display_body = if (msg.body.len > max_len) msg.body[0..max_len] else msg.body;
+                const first_line = if (std.mem.indexOf(u8, msg.body, "\n")) |nl| msg.body[0..nl] else msg.body;
+                const body_to_use = if (summary) first_line else msg.body;
+                const display_body = if (body_to_use.len > max_len) body_to_use[0..max_len] else body_to_use;
                 try stdout.print("  {s}", .{display_body});
-                if (msg.body.len > max_len) try stdout.writeAll("...");
+                if (body_to_use.len > max_len) try stdout.writeAll("...");
                 try stdout.writeAll("\n\n");
             }
         }
