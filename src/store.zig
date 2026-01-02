@@ -235,7 +235,7 @@ pub const Store = struct {
     ;
 
     pub fn init(allocator: std.mem.Allocator, dir: []const u8) !void {
-        // Create .zawinski directory
+        // Create store directory
         std.fs.makeDirAbsolute(dir) catch |err| switch (err) {
             error.PathAlreadyExists => return error.StoreAlreadyExists,
             else => return err,
@@ -1540,24 +1540,32 @@ pub fn discoverStoreDir(allocator: std.mem.Allocator) ![]const u8 {
 
     var current = try allocator.dupe(u8, cwd_path);
     while (true) {
-        const zawinski_dir = try std.fs.path.join(allocator, &.{ current, ".zawinski" });
-        defer allocator.free(zawinski_dir);
-
-        std.fs.accessAbsolute(zawinski_dir, .{}) catch {
-            // Try parent
-            const parent = std.fs.path.dirname(current);
-            if (parent == null or std.mem.eql(u8, parent.?, current)) {
-                allocator.free(current);
-                return StoreError.StoreNotFound;
-            }
-            const new_current = try allocator.dupe(u8, parent.?);
+        // Try .jwz first (preferred)
+        const jwz_dir = try std.fs.path.join(allocator, &.{ current, ".jwz" });
+        if (std.fs.accessAbsolute(jwz_dir, .{})) |_| {
             allocator.free(current);
-            current = new_current;
-            continue;
-        };
+            return jwz_dir;
+        } else |_| {
+            allocator.free(jwz_dir);
+        }
 
-        const result = try allocator.dupe(u8, zawinski_dir);
+        // Fall back to .zawinski (legacy)
+        const zawinski_dir = try std.fs.path.join(allocator, &.{ current, ".zawinski" });
+        if (std.fs.accessAbsolute(zawinski_dir, .{})) |_| {
+            allocator.free(current);
+            return zawinski_dir;
+        } else |_| {
+            allocator.free(zawinski_dir);
+        }
+
+        // Try parent directory
+        const parent = std.fs.path.dirname(current);
+        if (parent == null or std.mem.eql(u8, parent.?, current)) {
+            allocator.free(current);
+            return StoreError.StoreNotFound;
+        }
+        const new_current = try allocator.dupe(u8, parent.?);
         allocator.free(current);
-        return result;
+        current = new_current;
     }
 }

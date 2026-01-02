@@ -69,10 +69,25 @@ pub fn main() !void {
     }
 
     // Discover or use explicit store path
+    // For 'post' command, auto-initialize if no store found
     const store_dir = if (explicit_store) |sp|
         resolveStorePath(allocator, sp) catch |err| dieOnError(err)
-    else
-        zawinski.store.discoverStoreDir(allocator) catch |err| dieOnError(err);
+    else blk: {
+        break :blk zawinski.store.discoverStoreDir(allocator) catch |err| {
+            if (err == StoreError.StoreNotFound and std.mem.eql(u8, cmd, "post")) {
+                // Auto-initialize store in cwd (silent for scripting)
+                var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+                const cwd = std.fs.cwd().realpath(".", &cwd_buf) catch |e| dieOnError(e);
+                const new_store = std.fs.path.join(allocator, &.{ cwd, ".jwz" }) catch |e| dieOnError(e);
+                Store.init(allocator, new_store) catch |init_err| {
+                    allocator.free(new_store);
+                    dieOnError(init_err);
+                };
+                break :blk new_store;
+            }
+            dieOnError(err);
+        };
+    };
     defer allocator.free(store_dir);
 
     var store = Store.open(allocator, store_dir) catch |err| {
@@ -116,10 +131,10 @@ fn printUsage(stdout: anytype) !void {
         \\Usage: jwz [--store PATH] <command> [options]
         \\
         \\Commands:
-        \\  init                    Initialize a new store
-        \\  topic new <name>        Create a new topic
+        \\  init                    Initialize a new store (auto-created on post)
+        \\  topic new <name>        Create a new topic (auto-created on post)
         \\  topic list              List all topics
-        \\  post <topic> -m <msg>   Post a message to a topic
+        \\  post <topic> -m <msg>   Post a message (auto-inits store and topic)
         \\  reply <id> -m <msg>     Reply to a message
         \\  read <topic>            Read messages in a topic
         \\  show <id>               Show a message
@@ -131,9 +146,6 @@ fn printUsage(stdout: anytype) !void {
         \\
         \\Global Options:
         \\  --store PATH            Use store at PATH instead of auto-discovery
-        \\
-        \\Post Options:
-        \\  -c, --create            Create topic if it doesn't exist
         \\
         \\Read/Thread Options:
         \\  -s, --summary           Show first line of body only (truncated to 80 chars)
@@ -167,7 +179,7 @@ fn cmdInit(allocator: std.mem.Allocator, stdout: anytype, args: []const []const 
     else blk: {
         var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
         const cwd = try std.fs.cwd().realpath(".", &cwd_buf);
-        break :blk try std.fs.path.join(allocator, &.{ cwd, ".zawinski" });
+        break :blk try std.fs.path.join(allocator, &.{ cwd, ".jwz" });
     };
     defer allocator.free(store_dir);
 
@@ -310,7 +322,6 @@ fn cmdPost(allocator: std.mem.Allocator, stdout: anytype, store: *Store, args: [
     var body: ?[]const u8 = null;
     var json = false;
     var quiet = false;
-    var create_topic = false;
     var sender_id_arg: ?[]const u8 = null;
     var model_arg: ?[]const u8 = null;
     var role_arg: ?[]const u8 = null;
@@ -323,9 +334,6 @@ fn cmdPost(allocator: std.mem.Allocator, stdout: anytype, store: *Store, args: [
             i += 1;
         } else if (std.mem.eql(u8, arg, "--quiet")) {
             quiet = true;
-            i += 1;
-        } else if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--create")) {
-            create_topic = true;
             i += 1;
         } else if (std.mem.eql(u8, arg, "-m") or std.mem.eql(u8, arg, "--message")) {
             body = nextValue(args, &i, "message");
@@ -344,23 +352,20 @@ fn cmdPost(allocator: std.mem.Allocator, stdout: anytype, store: *Store, args: [
     }
 
     if (topic_name == null or body == null) {
-        die("usage: jwz post <topic> -m <message> [-c] [--as ID] [--model M] [--role R] [--json|--quiet]", .{});
+        die("usage: jwz post <topic> -m <message> [--as ID] [--model M] [--role R] [--json|--quiet]", .{});
     }
 
-    // Auto-create topic if --create flag is set
-    if (create_topic) {
-        // Try to create the topic
-        if (store.createTopic(topic_name.?, "")) |topic_id| {
-            // New topic was created - warn about UUID-like names (likely a mistake)
-            if (looksLikeUuid(topic_name.?)) {
-                std.debug.print("warning: topic '{s}' looks like a UUID\n", .{topic_name.?});
-                std.debug.print("hint: use descriptive names like 'tasks' or 'research:myproject'\n\n", .{});
-            }
-            allocator.free(topic_id);
-        } else |err| switch (err) {
-            StoreError.TopicExists => {}, // Already exists - idempotent, no UUID check needed
-            else => return err,
+    // Auto-create topic if it doesn't exist
+    if (store.createTopic(topic_name.?, "")) |topic_id| {
+        // New topic was created - warn about UUID-like names (likely a mistake)
+        if (looksLikeUuid(topic_name.?)) {
+            std.debug.print("warning: topic '{s}' looks like a UUID\n", .{topic_name.?});
+            std.debug.print("hint: use descriptive names like 'tasks' or 'research:myproject'\n\n", .{});
         }
+        allocator.free(topic_id);
+    } else |err| switch (err) {
+        StoreError.TopicExists => {}, // Already exists - idempotent
+        else => return err,
     }
 
     const processed_body = processEscapes(allocator, body.?) catch body.?;
@@ -1280,7 +1285,6 @@ fn dieOnError(err: anyerror) noreturn {
         \\To fix:
         \\  1. List existing topics: jwz topic list
         \\  2. Create a new topic:   jwz topic new <name>
-        \\  3. Or use --create/-c:   jwz post <topic> -c -m "message"
         ,
         StoreError.TopicExists => "Topic already exists.",
         StoreError.MessageNotFound => "Message not found. Use 'jwz search <query>' to find messages.",

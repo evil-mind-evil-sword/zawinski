@@ -33,13 +33,7 @@ zawinski stores messages in an append-only JSONL log. This format merges cleanly
 ## Quick Start
 
 ```sh
-# Initialize a store in .zawinski/
-jwz init
-
-# Create a topic
-jwz topic new tasks -d "Work queue for agents"
-
-# Post a message (returns message ID)
+# Just post - store and topic are auto-created
 jwz post tasks -m "Analyze data.csv and report anomalies"
 
 # Post with identity
@@ -60,22 +54,20 @@ jwz search "anomalies"
 
 ## For Agents
 
-This section covers common patterns and pitfalls when using jwz programmatically.
+This section covers common patterns when using jwz programmatically.
 
-### Topic Lifecycle
+### Auto-Initialization
 
-Topics must exist before you can post to them. Use one of these patterns:
+The `post` command automatically initializes everything:
+- **No store?** Creates `.jwz/` in the current directory
+- **No topic?** Creates the topic with that name
+
+This makes `post` fully idempotent—just post and it works:
 
 ```sh
-# Pattern 1: Explicit creation (recommended for clarity)
-jwz topic new "research:myproject" -d "Research findings"
+# This works even with no prior setup
 jwz post "research:myproject" -m "Finding: the API uses REST"
-
-# Pattern 2: Auto-create with --create/-c (recommended for scripts)
-jwz post "research:myproject" -c -m "Finding: the API uses REST"
 ```
-
-The `--create` flag creates the topic if it doesn't exist, making your commands idempotent.
 
 ### Topic Names
 
@@ -83,39 +75,23 @@ Topic names are strings, not IDs. Use descriptive, namespaced names:
 
 ```sh
 # Good: descriptive, namespaced
-jwz post "research:auth-flow" -c -m "..."
-jwz post "issue:bug-123" -c -m "..."
-jwz post "alice:status:session-id" -c -m "..."
+jwz post "research:auth-flow" -m "..."
+jwz post "issue:bug-123" -m "..."
+jwz post "alice:status:session-id" -m "..."
 
 # Bad: raw UUIDs or IDs (these look like topic names but aren't meaningful)
 jwz post "f239baf9-e91e-471b-b150-ef77ec071fd6" -m "..."  # Confusing
 ```
 
-### Common Errors
-
-**"Topic not found"**
-
-You tried to post to a topic that doesn't exist. Fix:
-1. List topics: `jwz topic list`
-2. Create it: `jwz topic new <name>`
-3. Or use `--create`: `jwz post <topic> -c -m "..."`
-
-**"No store found"**
-
-No `.zawinski/` directory exists. Fix:
-1. Initialize: `jwz init`
-2. Or specify location: `jwz --store /path/to/.zawinski post ...`
-
 ### Best Practices for Agents
 
-1. **Always use `--create`** when posting to avoid "topic not found" errors
-2. **Use `--quiet`** to get just the message ID for programmatic use
-3. **Use `--json`** when parsing output
-4. **Use namespaced topics** like `research:topic` or `issue:id` for organization
+1. **Use `--quiet`** to get just the message ID for programmatic use
+2. **Use `--json`** when parsing output
+3. **Use namespaced topics** like `research:topic` or `issue:id` for organization
 
 ```sh
 # Robust agent posting pattern
-jwz post "research:$TOPIC" -c --quiet --role agent -m "$MESSAGE"
+jwz post "research:$TOPIC" --quiet --role agent -m "$MESSAGE"
 ```
 
 ## Agent Identity
@@ -215,10 +191,10 @@ With `--json`, messages include full sender and git context:
 
 | Command | Description |
 |---------|-------------|
-| `init` | Initialize store in current directory |
-| `topic new <name>` | Create a new topic |
+| `init` | Initialize store in current directory (auto on post) |
+| `topic new <name>` | Create a new topic (auto on post) |
 | `topic list` | List all topics |
-| `post <topic> -m <msg>` | Post a message to a topic |
+| `post <topic> -m <msg>` | Post a message (auto-inits store and topic) |
 | `reply <id> -m <msg>` | Reply to a message |
 | `read <topic>` | Read messages in a topic |
 | `show <id>` | Show a single message |
@@ -237,7 +213,6 @@ With `--json`, messages include full sender and git context:
 |------|------------|-------------|
 | `--json` | all | Output as JSON (thread includes `depth` field) |
 | `--quiet` | post, reply, topic new | Output only the ID |
-| `-c, --create` | post | Create topic if it doesn't exist |
 | `-s, --summary` | read, thread | Show first line of body only (truncated to 80 chars) |
 | `--limit N` | read, search | Limit number of results |
 | `--topic NAME` | search | Filter search by topic |
@@ -265,12 +240,14 @@ If a prefix matches multiple messages, you will get an error asking for more cha
 zawinski uses a dual-storage architecture:
 
 ```
-.zawinski/
+.jwz/
   messages.jsonl   # Source of truth (append-only log)
   messages.db      # Query cache (SQLite + FTS5)
   .gitignore       # Excludes db files
   lock             # Process lock
 ```
+
+> **Note:** Legacy `.zawinski/` directories are still supported for backward compatibility.
 
 ### JSONL: Source of Truth
 
@@ -308,18 +285,18 @@ Existing stores are automatically upgraded when opened. New columns for sender a
 
 ## Store Discovery
 
-By default, `jwz` searches for `.zawinski/` starting from the current directory and walking up the tree (like git finds `.git/`). This means you can run commands from any subdirectory of your project.
+By default, `jwz` searches for `.jwz/` (or legacy `.zawinski/`) starting from the current directory and walking up the tree (like git finds `.git/`). This means you can run commands from any subdirectory of your project.
 
 ### Custom Store Location
 
-For agents that want to keep their store in a specific location (e.g., `.claude/.zawinski`):
+For agents that want to keep their store in a specific location (e.g., `.claude/.jwz`):
 
 ```sh
 # Initialize in a custom location
-jwz --store .claude/.zawinski init
+jwz --store .claude/.jwz init
 
 # Use the custom store for all commands
-jwz --store .claude/.zawinski post tasks -m "Hello"
+jwz --store .claude/.jwz post tasks -m "Hello"
 ```
 
 ## Related
