@@ -7,7 +7,7 @@ A local, topic-based messaging system designed for asynchronous, machine-to-mach
 ## Install
 
 ```sh
-curl -fsSL https://github.com/evil-mind-evil-sword/zawinski/releases/latest/download/install.sh | sh
+curl -fsSL https://evil-mind-evil-sword.github.io/releases/zawinski/install.sh | sh
 ```
 
 <details>
