@@ -1248,12 +1248,21 @@ pub const Store = struct {
 /// Discovers the store directory.
 ///
 /// Priority:
-/// 1. JWZ_STORE environment variable
-/// 2. Walk up directory tree looking for .jwz or .zawinski
+/// 1. Walk up directory tree looking for .jwz or .zawinski (local stores take precedence)
+/// 2. JWZ_STORE environment variable (fallback)
 ///
 /// Returns an allocated path; caller must free.
 pub fn discoverStoreDir(allocator: std.mem.Allocator) ![]const u8 {
-    // Check JWZ_STORE environment variable first
+    // Priority 1: Walk up directory tree (local stores take precedence)
+    const local_result = walkUpForStore(allocator);
+    if (local_result) |path| {
+        return path;
+    } else |walk_err| switch (walk_err) {
+        StoreError.StoreNotFound => {}, // No local store, try env var
+        else => return walk_err,
+    }
+
+    // Priority 2: JWZ_STORE environment variable (fallback)
     if (std.process.getEnvVarOwned(allocator, "JWZ_STORE")) |env| {
         defer allocator.free(env);
         if (std.fs.path.isAbsolute(env)) {
@@ -1267,12 +1276,18 @@ pub fn discoverStoreDir(allocator: std.mem.Allocator) ![]const u8 {
         else => return err,
     }
 
-    // Walk up directory tree
+    return StoreError.StoreNotFound;
+}
+
+/// Walks up the directory tree looking for .jwz or .zawinski stores.
+fn walkUpForStore(allocator: std.mem.Allocator) ![]const u8 {
     var cwd = std.fs.cwd();
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const cwd_path = try cwd.realpath(".", &path_buf);
 
     var current = try allocator.dupe(u8, cwd_path);
+    errdefer allocator.free(current);
+
     while (true) {
         // Try .jwz first (preferred)
         const jwz_dir = try std.fs.path.join(allocator, &.{ current, ".jwz" });
