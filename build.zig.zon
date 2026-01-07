@@ -1,6 +1,6 @@
 .{
     .name = .zawinski,
-    .version = "26.1.10",
+    .version = "26.1.11",
     .fingerprint = 0xc85f008c9498eb70,
     .minimum_zig_version = "0.15.2",
 
