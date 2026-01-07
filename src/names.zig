@@ -62,22 +62,8 @@ const animals = [_][]const u8{
     "Turtle",   "Viper",    "Whale",    "Wolf",
 };
 
-/// Pre-computed name table (64 * 64 * 64 = 262,144 combinations)
-/// Generated at comptime to avoid runtime string allocation.
-const name_table = blk: {
-    @setEvalBranchQuota(20_000_000);
-    const total = adjectives.len * colors.len * animals.len;
-    var table: [total][]const u8 = undefined;
-    for (0..adjectives.len) |i| {
-        for (0..colors.len) |j| {
-            for (0..animals.len) |k| {
-                const idx = i * colors.len * animals.len + j * animals.len + k;
-                table[idx] = adjectives[i] ++ " " ++ colors[j] ++ " " ++ animals[k];
-            }
-        }
-    }
-    break :blk table;
-};
+/// Buffer for runtime name generation (max ~25 chars: "Fearless Obsidian Penguin")
+var name_buffer: [32]u8 = undefined;
 
 /// Decode Crockford base32 character to 5-bit value (0-31).
 /// Returns 0 for invalid characters.
@@ -122,7 +108,7 @@ fn decodeBase32(c: u8) u5 {
 /// Generate a memorable name from a ULID.
 /// Uses randomness portion (positions 10-13) decoded from base32.
 /// Combines 4 base32 chars (18 bits) to uniformly index 262,144 combinations.
-/// Returns a static slice (no allocation needed).
+/// Returns a slice into a static buffer (valid until next call).
 pub fn fromUlid(ulid: []const u8) []const u8 {
     if (ulid.len < 14) return "Unknown Agent";
 
@@ -138,7 +124,30 @@ pub fn fromUlid(ulid: []const u8) []const u8 {
     const total = adjectives.len * colors.len * animals.len;
     const idx = combined % total;
 
-    return name_table[idx];
+    // Decompose index into adjective/color/animal indices
+    const adj_idx = idx / (colors.len * animals.len);
+    const remainder = idx % (colors.len * animals.len);
+    const col_idx = remainder / animals.len;
+    const ani_idx = remainder % animals.len;
+
+    // Build name at runtime: "Adjective Color Animal"
+    const adj = adjectives[adj_idx];
+    const col = colors[col_idx];
+    const ani = animals[ani_idx];
+
+    var pos: usize = 0;
+    @memcpy(name_buffer[pos..][0..adj.len], adj);
+    pos += adj.len;
+    name_buffer[pos] = ' ';
+    pos += 1;
+    @memcpy(name_buffer[pos..][0..col.len], col);
+    pos += col.len;
+    name_buffer[pos] = ' ';
+    pos += 1;
+    @memcpy(name_buffer[pos..][0..ani.len], ani);
+    pos += ani.len;
+
+    return name_buffer[0..pos];
 }
 
 test "name generation is deterministic" {
