@@ -45,7 +45,7 @@ jobs:
         run: zig version
 
       - name: Build
-        run: zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}
+        run: zig build -Doptimize=ReleaseSmall -Dtarget=${{ matrix.target }}
 
       - name: Package
         run: |
@@ -156,6 +156,11 @@ jobs:
       - name: Deploy to site
         run: |
           VERSION="${{ steps.version.outputs.version }}"
+
+          # Prune old versions (keep only latest)
+          rm -rf site/releases/zawinski/v*
+
+          # Deploy new version
           mkdir -p "site/releases/zawinski/${VERSION}"
           cp release/* "site/releases/zawinski/${VERSION}/"
           cp release/install.sh "site/releases/zawinski/install.sh"
