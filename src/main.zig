@@ -123,6 +123,8 @@ pub fn main() !void {
             break :blk cmdSearch(allocator, stdout, &store, args.items[2..]);
         } else if (std.mem.eql(u8, cmd, "blob")) {
             break :blk cmdBlob(allocator, stdout, &store, args.items[2..]);
+        } else if (std.mem.eql(u8, cmd, "migrate")) {
+            break :blk cmdMigrate(allocator, stdout, &store, args.items[2..]);
         } else {
             die("unknown command: {s}", .{cmd});
         }
@@ -150,6 +152,7 @@ fn printUsage(stdout: anytype) !void {
         \\  blob put <file>         Store a blob, output content hash
         \\  blob get <hash>         Retrieve blob data by hash
         \\  blob info <hash>        Show blob metadata
+        \\  migrate <source>        Import messages from another store
         \\  help                    Show this help
         \\
         \\Global Options:
@@ -995,6 +998,242 @@ fn cmdBlobInfo(allocator: std.mem.Allocator, stdout: anytype, store: *Store, arg
             try stdout.print("Type: {s}\n", .{mt});
         }
         try stdout.print("Created: {s}\n", .{formatTimeAgo(blob.created_at)});
+    }
+}
+
+fn cmdMigrate(allocator: std.mem.Allocator, stdout: anytype, store: *Store, args: []const []const u8) !void {
+    var source_path: ?[]const u8 = null;
+    var json = false;
+    var dry_run = false;
+
+    var i: usize = 0;
+    while (i < args.len) {
+        const arg = args[i];
+        if (std.mem.eql(u8, arg, "--json")) {
+            json = true;
+            i += 1;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--dry-run")) {
+            dry_run = true;
+            i += 1;
+            continue;
+        }
+        if (arg.len > 0 and arg[0] != '-') {
+            if (source_path != null) die("multiple source paths provided", .{});
+            source_path = arg;
+            i += 1;
+            continue;
+        }
+        die("unknown flag: {s}", .{arg});
+    }
+
+    if (source_path == null) die("usage: jwz migrate <source-store> [--dry-run] [--json]", .{});
+
+    // Resolve source path
+    const resolved_source = try resolveStorePath(allocator, source_path.?);
+    defer allocator.free(resolved_source);
+
+    // Check source jsonl exists
+    const source_jsonl = try std.fs.path.join(allocator, &.{ resolved_source, "messages.jsonl" });
+    defer allocator.free(source_jsonl);
+
+    std.fs.accessAbsolute(source_jsonl, .{}) catch {
+        die("source store not found: {s}", .{resolved_source});
+    };
+
+    // Read source jsonl
+    var source_file = try std.fs.openFileAbsolute(source_jsonl, .{});
+    defer source_file.close();
+    const stat = try source_file.stat();
+    const source_content = try allocator.alloc(u8, stat.size);
+    defer allocator.free(source_content);
+    const bytes_read = try source_file.readAll(source_content);
+    const actual_content = source_content[0..bytes_read];
+
+    // Build set of existing topic names and message IDs in destination
+    var existing_topics = std.StringHashMap([]const u8).init(allocator); // name -> id
+    defer {
+        var val_iter = existing_topics.valueIterator();
+        while (val_iter.next()) |v| allocator.free(v.*);
+        var key_iter = existing_topics.keyIterator();
+        while (key_iter.next()) |k| allocator.free(k.*);
+        existing_topics.deinit();
+    }
+    {
+        const stmt = try zawinski.sqlite.prepare(store.db, "SELECT name, id FROM topics;");
+        defer zawinski.sqlite.finalize(stmt);
+        while (try zawinski.sqlite.step(stmt)) {
+            const name = zawinski.sqlite.columnText(stmt, 0);
+            const id = zawinski.sqlite.columnText(stmt, 1);
+            const name_copy = try allocator.dupe(u8, name);
+            const id_copy = try allocator.dupe(u8, id);
+            try existing_topics.put(name_copy, id_copy);
+        }
+    }
+
+    var existing_messages = std.StringHashMap(void).init(allocator);
+    defer {
+        var key_iter = existing_messages.keyIterator();
+        while (key_iter.next()) |k| allocator.free(k.*);
+        existing_messages.deinit();
+    }
+    {
+        const stmt = try zawinski.sqlite.prepare(store.db, "SELECT id FROM messages;");
+        defer zawinski.sqlite.finalize(stmt);
+        while (try zawinski.sqlite.step(stmt)) {
+            const id = zawinski.sqlite.columnText(stmt, 0);
+            const id_copy = try allocator.dupe(u8, id);
+            try existing_messages.put(id_copy, {});
+        }
+    }
+
+    // Collect lines to migrate
+    var topic_lines: std.ArrayList([]const u8) = .empty;
+    defer topic_lines.deinit(allocator);
+    var message_lines: std.ArrayList([]const u8) = .empty;
+    defer message_lines.deinit(allocator);
+
+    // Track topic name -> id mappings for topics we're migrating (need to dupe strings)
+    var migrated_topics = std.StringHashMap([]const u8).init(allocator); // name -> id
+    defer {
+        var val_iter = migrated_topics.valueIterator();
+        while (val_iter.next()) |v| allocator.free(v.*);
+        var key_iter = migrated_topics.keyIterator();
+        while (key_iter.next()) |k| allocator.free(k.*);
+        migrated_topics.deinit();
+    }
+    var migrated_messages = std.StringHashMap(void).init(allocator);
+    defer {
+        var key_iter = migrated_messages.keyIterator();
+        while (key_iter.next()) |k| allocator.free(k.*);
+        migrated_messages.deinit();
+    }
+
+    var lines = std.mem.splitScalar(u8, actual_content, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, "\r\n\t ");
+        if (line.len == 0) continue;
+
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, line, .{}) catch continue;
+        defer parsed.deinit();
+        if (parsed.value != .object) continue;
+        const obj = parsed.value.object;
+
+        const type_val = obj.get("type") orelse continue;
+        if (type_val != .string) continue;
+        const type_str = type_val.string;
+
+        if (std.mem.eql(u8, type_str, "topic")) {
+            const name_val = obj.get("name") orelse continue;
+            if (name_val != .string) continue;
+            const topic_name = name_val.string;
+
+            const id_val = obj.get("id") orelse continue;
+            if (id_val != .string) continue;
+            const topic_id = id_val.string;
+
+            // Skip if topic already exists (by name)
+            if (existing_topics.contains(topic_name)) continue;
+            if (migrated_topics.contains(topic_name)) continue;
+
+            // Dupe strings since parsed will be freed
+            const name_copy = try allocator.dupe(u8, topic_name);
+            const id_copy = try allocator.dupe(u8, topic_id);
+            try migrated_topics.put(name_copy, id_copy);
+            try topic_lines.append(allocator, line);
+        } else if (std.mem.eql(u8, type_str, "message")) {
+            const id_val = obj.get("id") orelse continue;
+            if (id_val != .string) continue;
+            const msg_id = id_val.string;
+
+            // Skip if message already exists
+            if (existing_messages.contains(msg_id)) continue;
+            if (migrated_messages.contains(msg_id)) continue;
+
+            // Check that topic exists or will be migrated
+            const topic_id_val = obj.get("topic_id") orelse continue;
+            if (topic_id_val != .string) continue;
+            const topic_id = topic_id_val.string;
+
+            // Find if the topic exists (need to check by topic_id, not name)
+            var topic_exists = false;
+            {
+                var val_iter = existing_topics.valueIterator();
+                while (val_iter.next()) |v| {
+                    if (std.mem.eql(u8, v.*, topic_id)) {
+                        topic_exists = true;
+                        break;
+                    }
+                }
+            }
+            if (!topic_exists) {
+                var val_iter = migrated_topics.valueIterator();
+                while (val_iter.next()) |v| {
+                    if (std.mem.eql(u8, v.*, topic_id)) {
+                        topic_exists = true;
+                        break;
+                    }
+                }
+            }
+
+            if (topic_exists) {
+                const id_copy = try allocator.dupe(u8, msg_id);
+                try migrated_messages.put(id_copy, {});
+                try message_lines.append(allocator, line);
+            }
+        }
+    }
+
+    const topics_migrated = topic_lines.items.len;
+    const messages_migrated = message_lines.items.len;
+
+    if (json) {
+        const record = struct {
+            dry_run: bool,
+            topics: usize,
+            messages: usize,
+        }{
+            .dry_run = dry_run,
+            .topics = topics_migrated,
+            .messages = messages_migrated,
+        };
+        try std.json.Stringify.value(record, .{ .whitespace = .minified }, stdout);
+        try stdout.writeByte('\n');
+    } else {
+        if (dry_run) {
+            try stdout.print("Would migrate {d} topic(s), {d} message(s) from {s}\n", .{ topics_migrated, messages_migrated, resolved_source });
+        } else {
+            try stdout.print("Migrating {d} topic(s), {d} message(s) from {s}\n", .{ topics_migrated, messages_migrated, resolved_source });
+        }
+    }
+
+    if (dry_run or (topics_migrated == 0 and messages_migrated == 0)) return;
+
+    // Append to destination jsonl (topics first, then messages)
+    var dest_file = try std.fs.openFileAbsolute(store.jsonl_path, .{ .mode = .read_write });
+    defer dest_file.close();
+    try dest_file.seekFromEnd(0);
+
+    var write_buf: [4096]u8 = undefined;
+    var writer = dest_file.writer(&write_buf);
+
+    for (topic_lines.items) |line| {
+        try writer.interface.writeAll(line);
+        try writer.interface.writeByte('\n');
+    }
+    for (message_lines.items) |line| {
+        try writer.interface.writeAll(line);
+        try writer.interface.writeByte('\n');
+    }
+    try writer.interface.flush();
+    try dest_file.sync();
+
+    // Import new records into SQLite
+    try store.importIfNeeded();
+
+    if (!json) {
+        try stdout.print("Migration complete.\n", .{});
     }
 }
 

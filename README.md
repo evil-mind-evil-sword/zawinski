@@ -200,6 +200,7 @@ With `--json`, messages include full sender and git context:
 | `show <id>` | Show a single message |
 | `thread <id>` | Show message and all replies |
 | `search <query>` | Full-text search |
+| `migrate <source>` | Import messages from another store |
 
 ### Global Options
 
