@@ -984,10 +984,22 @@ pub const Store = struct {
     }
 
     fn applyTopicRecord(self: *Store, obj: std.json.ObjectMap) !void {
-        const id = if (obj.get("id")) |v| v.string else return error.InvalidMessageId;
-        const name = if (obj.get("name")) |v| v.string else return error.InvalidMessageId;
-        const description = if (obj.get("description")) |v| v.string else "";
-        const created_at = if (obj.get("created_at")) |v| v.integer else return error.InvalidMessageId;
+        const id = if (obj.get("id")) |v| switch (v) {
+            .string => |s| s,
+            else => return error.InvalidMessageId,
+        } else return error.InvalidMessageId;
+        const name = if (obj.get("name")) |v| switch (v) {
+            .string => |s| s,
+            else => return error.InvalidMessageId,
+        } else return error.InvalidMessageId;
+        const description = if (obj.get("description")) |v| switch (v) {
+            .string => |s| s,
+            else => "",
+        } else "";
+        const created_at = if (obj.get("created_at")) |v| switch (v) {
+            .integer => |i| i,
+            else => return error.InvalidMessageId,
+        } else return error.InvalidMessageId;
 
         // Use INSERT OR IGNORE to avoid CASCADE DELETE issues with INSERT OR REPLACE.
         // JSONL is append-only, so existing records don't need updating.
@@ -1001,15 +1013,43 @@ pub const Store = struct {
     }
 
     fn applyMessageRecord(self: *Store, obj: std.json.ObjectMap) !void {
-        const id = if (obj.get("id")) |v| v.string else return error.InvalidMessageId;
-        const topic_id = if (obj.get("topic_id")) |v| v.string else return error.InvalidMessageId;
+        const id = if (obj.get("id")) |v| switch (v) {
+            .string => |s| s,
+            else => return error.InvalidMessageId,
+        } else return error.InvalidMessageId;
+        const topic_id = if (obj.get("topic_id")) |v| switch (v) {
+            .string => |s| s,
+            else => return error.InvalidMessageId,
+        } else return error.InvalidMessageId;
         const parent_id = if (obj.get("parent_id")) |v| switch (v) {
             .string => |s| s,
             .null => null,
             else => null,
         } else null;
-        const body = if (obj.get("body")) |v| v.string else "";
-        const created_at = if (obj.get("created_at")) |v| v.integer else return error.InvalidMessageId;
+
+        // Body can be a string or an array of bytes (from some serializers)
+        var body_alloc: ?[]u8 = null;
+        defer if (body_alloc) |b| self.allocator.free(b);
+        const body: []const u8 = if (obj.get("body")) |v| switch (v) {
+            .string => |s| s,
+            .array => |arr| blk: {
+                // Convert byte array to string
+                var buf = self.allocator.alloc(u8, arr.items.len) catch return error.OutOfMemory;
+                for (arr.items, 0..) |item, i| {
+                    buf[i] = switch (item) {
+                        .integer => |n| @as(u8, @intCast(n & 0xFF)),
+                        else => '?',
+                    };
+                }
+                body_alloc = buf;
+                break :blk buf;
+            },
+            else => "",
+        } else "";
+        const created_at = if (obj.get("created_at")) |v| switch (v) {
+            .integer => |i| i,
+            else => return error.InvalidMessageId,
+        } else return error.InvalidMessageId;
 
         // Extract sender fields if present
         var sender_id: ?[]const u8 = null;
